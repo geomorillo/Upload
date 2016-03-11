@@ -1,8 +1,8 @@
 <?php
-/*
- * Upload helper for simplemvcframework based on Codeigniter's 
- */
+
 namespace Helpers;
+
+use Helpers\Database;
 
 class Upload {
 
@@ -191,11 +191,6 @@ class Upload {
                 $this->set_error('upload_invalid_filetype');
                 return FALSE;
             }
-        }
-
-        // Convert the file size to kilobytes
-        if ($this->file_size > 0) {
-            $this->file_size = round($this->file_size / 1024, 2);
         }
 
         // Is the file size within the allowed maximum?
@@ -1118,7 +1113,7 @@ class Upload {
     function is_really_writable($file) {
         define('FOPEN_WRITE_CREATE', 'ab');
         define('DIR_WRITE_MODE', 0777);
-        
+
         // If we're on a Unix server with safe_mode off we call is_writable
         if (DIRECTORY_SEPARATOR == '/' AND @ ini_get("safe_mode") == FALSE) {
             return is_writable($file);
@@ -1128,7 +1123,7 @@ class Upload {
         // write a file then read it.  Bah...
         if (is_dir($file)) {
             $file = rtrim($file, '/') . '/' . md5(mt_rand(1, 100) . mt_rand(1, 100));
-            
+
             if (($fp = @fopen($file, FOPEN_WRITE_CREATE)) === FALSE) {
                 return FALSE;
             }
@@ -1143,6 +1138,71 @@ class Upload {
 
         fclose($fp);
         return TRUE;
+    }
+
+    /**
+     * Upload a file to db with aditional data
+     * @param array $fileData Array that has all the info pertaining to the upload, including 'file_name'
+     * @param string $table The table name
+     * @param array $tableData An array containing a row of data column -> value
+     * @return lastinsertid/FALSE
+     */
+    public function fileToDb($fileData, $table, $tableData) {
+        if ($table && $fileData) {
+            $fp = fopen($fileData['full_path'], 'r');
+            $file_content = fread($fp, filesize($fileData['full_path']));
+            fclose($fp);
+            $data['file_content'] = $file_content;
+            $data['file_type'] = $fileData['file_type'];
+            $data['file_size'] = $fileData['file_size'];
+            foreach ($tableData as $column => $value) {
+                $data[$column] = $value;
+            }
+            $dbConn = Database::get();
+            return $dbConn->insert($table, $data); //last insert id
+        } else {
+            return FALSE;
+        }
+    }
+
+    /**
+     * Finds a file in a table and downloads it
+     * @param string $table The table to search
+     * @param array $where  Array containing the search.
+     * @return boolean If fail return FALSE
+     */
+    public function dbFileDownload($table, $where) {
+        if ($table && $where) {
+            $dbConn = Database::get();
+            $whereDetails = null;
+            $i = 0;
+            foreach ($where as $key => $value) {
+                if ($i == 0) {
+                    $whereDetails .= "$key = :$key";
+                } else {
+                    $whereDetails .= " AND $key = :$key";
+                }
+                $i++;
+            }
+            $whereDetails = ltrim($whereDetails, ' AND ');
+            $sql = "SELECT * FROM " . PREFIX . "$table WHERE $whereDetails";
+
+            $file_row = $dbConn->select($sql, $where);
+            //it should only find 1 file
+            if (count($file_row) > 1) {
+                return FALSE;
+            }
+            $size = $file_row{0}->file_size;
+            $type = $file_row{0}->file_type;
+            $file_name = uniqid('download_') . $type;
+            $content = $file_row{0}->file_content;
+            header("Content-length: $size");
+            header("Content-type: $type");
+            header("Content-Disposition: attachment; filename=$file_name");
+            echo $content;
+        } else {
+            return FALSE;
+        }
     }
 
 }
